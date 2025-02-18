@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ambient Haiku Generator</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(45deg, #6a11cb, #2575fc, #41c7c7, #8a2be2);
+            background-size: 400% 400%;
+            animation: gradientBG 30s ease infinite;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        @keyframes gradientBG {
+            0% {
+                background-position: 0% 50%;
+            }
+            50% {
+                background-position: 100% 50%;
+            }
+            100% {
+                background-position: 0% 50%;
+            }
+        }
+
+        .container {
+            text-align: center;
+            padding: 40px;
+            max-width: 600px;
+            background-color: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #ffffff;
+            font-weight: 300;
+            font-size: 28px;
+            margin-bottom: 30px;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        #haiku {
+            color: white;
+            font-size: 24px;
+            line-height: 1.8;
+            white-space: pre-line;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            min-height: 150px;
+            transition: opacity 2s ease;
+            opacity: 1;
+        }
+
+        .note {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.7);
+            margin-top: 40px;
+        }
+        
+        .loading {
+            color: rgba(255, 255, 255, 0.7);
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Ambient Haiku</h1>
+        <div id="haiku" class="loading">Loading word data...</div>
+        <div class="note">
+            <p>Haikus are generated automatically every few moments...</p>
+        </div>
+    </div>
+
+    <script>
+        // Word dictionary will be loaded from JSON
+        let wordDictionary = null;
+
+        // Load the word data from the separate JSON file
+        async function loadWordData() {
+            try {
+                // In a real deployment, you would use the actual path to your JSON file
+                // For this example, the wordData variable is hardcoded below
+                const response = await fetch('organized.json');
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                const wordData = await response.json();
+                
+                wordDictionary = wordData;
+                startHaikuGenerator();
+            } catch (error) {
+                console.error("Error loading word data:", error);
+                document.getElementById('haiku').textContent = "Failed to load word data. Please try refreshing the page.";
+            }
+        }
+
+        // Function to get all possible words for a type with syllables less than or equal to max
+	function getWordsWithMaxSyllables(type, maxSyllables) {
+            let result = [];
+            // Check if the type exists in the dictionary
+            if (!wordDictionary[type]) {
+                return result;
+            }
+        
+            // Get all syllable counts for this type
+            const syllableCounts = Object.keys(wordDictionary[type]);
+        
+            // Process each syllable count that's less than or equal to maxSyllables
+            syllableCounts.forEach(syllableCount => {
+                if (parseInt(syllableCount) <= maxSyllables) {
+                    const words = wordDictionary[type][syllableCount];
+                    const wordsWithSyllables = words.map(word => ({
+                        word: word,
+                        syllables: parseInt(syllableCount)
+                    }));
+                    result = result.concat(wordsWithSyllables);
+                }
+            });
+        
+            // Shuffle the array to avoid repetitive patterns
+            return result.sort(() => 0.5 - Math.random());
+        }
+
+        // Backtracking function to construct a haiku line
+        function constructLineWithBacktracking(structure, targetSyllables) {
+            const result = [];
+            
+            function backtrack(structureIndex, remainingSyllables) {
+                // Base case: if we've used all structure elements and have exactly 0 syllables left, we're done
+                if (structureIndex === structure.length && remainingSyllables === 0) {
+                    return true;
+                }
+                
+                // If we've used all structure elements but still have syllables left, or if we have negative syllables, fail
+                if (structureIndex === structure.length || remainingSyllables < 0) {
+                    return false;
+                }
+                
+                // Get the current part of speech we're trying to fill
+                const currentType = structure[structureIndex];
+                
+                // Calculate max syllables for this position - ensure we leave at least 1 syllable per remaining position
+                const remainingPositions = structure.length - structureIndex - 1;
+                const maxSyllablesForPosition = remainingSyllables - remainingPositions;
+                
+                // If we can't leave enough syllables for remaining positions, fail
+                if (maxSyllablesForPosition < 1) {
+                    return false;
+                }
+                
+                // Get potential words for this position
+                const potentialWords = getWordsWithMaxSyllables(currentType, maxSyllablesForPosition);
+                
+                // Try each potential word
+                for (const { word, syllables } of potentialWords) {
+                    // Add this word to our result
+                    result[structureIndex] = word;
+                    
+                    // Recursively try to complete the line with this word choice
+                    if (backtrack(structureIndex + 1, remainingSyllables - syllables)) {
+                        return true;
+                    }
+                    
+                    // If we get here, this word choice didn't work, so we'll try the next one
+                }
+                
+                // If no word worked, backtrack
+                return false;
+            }
+            
+            // Start backtracking from the first position with full syllable count
+            const success = backtrack(0, targetSyllables);
+            
+            // If successful, join the words; otherwise, return error message
+            return success ? result.join(" ") : "Could not generate line";
+        }
+
+        // Function to generate a complete haiku
+        function generateHaiku() {
+            return [
+                constructLineWithBacktracking(["adjective", "noun"], 5),
+                constructLineWithBacktracking(["noun", "verb", "adjective"], 7),
+                constructLineWithBacktracking(["verb", "noun"], 5)
+            ].join("\n");
+        }
+
+        // Function to update the haiku with a smooth transition
+        function updateHaiku() {
+            const haikuEl = document.getElementById('haiku');
+            
+            // Fade out
+            haikuEl.style.opacity = 0;
+            
+            setTimeout(() => {
+                // Generate new haiku
+                const haiku = generateHaiku();
+                haikuEl.textContent = haiku;
+                haikuEl.classList.remove('loading');
+                
+                // Fade in
+                haikuEl.style.opacity = 1;
+                
+                // Schedule next update
+                setTimeout(updateHaiku, 8000); // 8 seconds between haikus
+            }, 2000); // 2 seconds for fade out
+        }
+
+        // Start the haiku generation cycle once word data is loaded
+        function startHaikuGenerator() {
+            // Generate first haiku immediately
+            const haikuEl = document.getElementById('haiku');
+            haikuEl.textContent = generateHaiku();
+            haikuEl.classList.remove('loading');
+            
+            // Schedule the first update
+            setTimeout(updateHaiku, 8000);
+        }
+
+        // Begin loading word data when the page loads
+        document.addEventListener('DOMContentLoaded', loadWordData);
+    </script>
+</body>
+</html>
